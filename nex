@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+#  nex
+# @ghe - 2023
+
+ 
+query_host() {
+    local site="$1"
+    local hostname="$2"
+    "$NEX_DB" queryHost --site="$site" --hostname="$hostname"
+}
+
+format() {
+    if echo "$1" | grep -q 'sudo' ; then 
+        read -s -p "sudo password: " udo 
+        echo "export TERM=xterm ; $1" | sed "s/sudo /echo $udo \| sudo \-S /g"
+    else
+        echo "$1"
+    fi
+}
+
+parseHost() {
+    local site hostname
+    if [[ $ipaddr =~ [a-zA-Z] ]]; then 
+        site=$(echo "$ipaddr" | awk -F':' '{ print $1 }')
+        hostname=$(echo "$ipaddr" | awk -F':' '{ print $2 }') 
+
+       . <(query_host "$site" "$hostname" \
+            | sed -e 's/.*\[//g' -e 's/ /\n/g' \
+                  -e 's/\]//g' -e 's/:/=/g' )
+        
+        if [[ -z $ipaddr ]]; then
+            echo "${site}:${hostname} not found in the database"
+        fi
+    fi
+}
+
+dump-db() {
+    $NEX_DB printDb
+}
+
+build-db() {
+    local csv len
+    csv="./nex.hosts"
+    len=$(wc -l "$csv")
+    [ ! -f $csv ] && {
+        echo "Error: no $csv file found!"
+    } || {
+        awk -F, 'NR > 1 !/^\/\// {
+            printf "$HOME/.nex/nex_db addHost -site=\"%s\" -hostname=\"%s\" \
+            -ipaddr=\"%s\" -username=\"%s\" -password=\"%s\" \
+            -sudo_password=\"%s\" -remote_port=%d -socks_port=%d\n", 
+                $1, $2, $3, $4, $5, $6, $7, $8
+        }' "$csv" | sh
+        }
+}
+
+connect() {
+    [ -z "$ipaddr" ] && echo "usage: nex connect (ipaddr) (optional: commands)" || {
+        parseHost
+        [ ! -z "$TARGET" ] && TARGET=$(format "$TARGET") 
+        sshpass -p "${password}" ssh -p ${remote_port} \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -y "$username"@$ipaddr $TARGET
+    }
+}
+
+shareids() {
+    [ -z "$ipaddr" ] && echo "usage: nex shareids (ipaddr)" || {
+        printf "Exchanging SSH keys with %s...\n" "$ipaddr"
+        ssh-keyscan "$ipaddr" >> ~/.ssh/known_hosts
+        sshpass -p "${password}" ssh-copy-id -f "-p $remote_port $username@$ipaddr" >/dev/null 2>&1
+    }
+}
+
+sudopass() {
+    echo "$sudo_password"
+}
+
+pass() {
+    echo "$password"
+}
+
+user() {
+    echo "$username"
+}
+
+ping() {
+    parseHost
+    timeout 2 sh -c "ping -c1 $ipaddr"
+    [[ $? != 0 ]] && echo "ping unsuccessful"
+}
+
+ip() {
+    parseHost
+    echo "$ipaddr"
+}
+
+dynpf() {
+    [ -z "$ipaddr" ] && echo "usage: nex dynpf (ipaddr) (remote_port)" || {
+        parseHost
+        nohup sshpass -p "${password}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -y -R $TARGET:localhost:$TARGET "$username"@$ipaddr "sleep 3600" &
+    }
+}
+
+get() {
+    [ -z "$ipaddr" ] && echo "usage: nex get (ipaddr) (remote_file)" || {
+        parseHost
+        filename=$(basename "$TARGET")
+        printf "Pulling $TARGET from $ipaddr...\n"
+        sshpass -p "${password}" scp -P $remote_port -rp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        $username@${ipaddr}:$TARGET . > /dev/null 2>&1
+        [[ -f ./$filename ]] && {
+            printf "$filename downloaded successfully!\n"
+        }
+    }
+}
+
+put() {
+    [ -z $ipaddr ] && echo "usage: nex put (ipaddr) (local_file)" || {
+
+        putDir="/home/$username"
+
+        parseHost
+        filename=$(basename "$TARGET")
+        sshpass -p "${password}" scp -P $remote_port -rp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        $TARGET $username@${ipaddr}:${putDir}/$filename > /dev/null 2>&1
+        TARGET="hostname ; ls -lrt ${TARGET}"
+        connect
+    }
+}
+
+socks() {
+    [ -z $ipaddr ] && echo -e "nex get (ipaddr)" -e "note: socks port is specified in the database"  || {
+        parseHost
+        sshpass -p "${password}" ssh -p ${remote_port} -D $socks_port -q -C -N -f $username@${ipaddr}
+        printf "SOCKS proxy started!\n  host: ${ipaddr}\n  local: 127.0.0.1:$socks_port\n"
+    }
+}
+
+zap() {
+    [ -z $ipaddr ] && echo "usage: nex zap [ (list_of_ips) ] (commands)" || {
+        list=$(echo $ZAP_ARGS | sed -e 's/.*\[//g' -e 's/\].*//g')
+        args="$(echo $ZAP_ARGS | cut -d']' -f2)"
+        
+        arr=
+        for l in $list ; do
+            ipaddr="$l"
+            parseHost
+            arr="$arr $ipaddr"
+        done
+        echo $arr | tr ' ' '\n' | xargs -P $(echo $list | wc -w) -I {} \
+            sshpass -p "${password}" ssh -p $remote_port \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -y \
+            "$username"@{} "echo \$(hostname ; $args)" 2>/dev/null | sort
+    }
+}
+
+clone() {
+    [ -z $ipaddr ] && echo "usage: nex clone (ipaddr)" || {
+        local dumpname="$(echo $ipaddr).tgz"
+        parseHost
+
+        sshpass -p "$password" ssh -p "$remote_port" \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -y \
+            "$username@$ipaddr" "echo $(sudopass) | sudo -S tar -czvf - \
+            --exclude='EAS' --exclude='EXA' --exclude='gpfs' --exclude='gsfs' \
+            --exclude='usr/lpp/mmfs' --exclude='var/log/messages*' --exclude='var/log/sa' \
+            --exclude='sys/fs/cgroup' --exclude='run' --exclude='home' --exclude='boot' \
+            --exclude='dev' --exclude='mnt' --exclude='var/spool/postfix' --exclude='root/' \
+            --exclude='tmp' --exclude='*log' --exclude='*.log' --exclude='*.db3' --exclude='*.dump' \
+            --exclude='proc' --exclude='var/lib/pgsql' --exclude='*bak' --exclude='etc/fstab' \
+            --exclude='etc/udev' --exclude='etc/sysconfig/network-scripts' \
+            --exclude='etc/NetworkManager' --exclude='.*tar.gz' --exclude='var/cache' \
+            --exclude='*mmdb' /" > "$dumpname"
+    }
+}
+
+install() {
+    mkdir -p ~/.nex
+
+    AUTOCOMPLETE="$HOME/.nex/.autocomplete.sh"
+    if [ ! -f "$AUTOCOMPLETE" ]; then
+        cp "./$(basename $AUTOCOMPLETE)" "$AUTOCOMPLETE"
+    fi
+
+    cp ./go/nex_db $NEX_DB 
+
+    echo "Creating database and default configuration..."
+    
+    if [ ! -x "$NEX_DB" ]; then
+        echo "Error: $NEX_DB is not executable or not found."
+        exit 1
+    fi
+
+    if ! $NEX_DB install; then
+        echo "Error running $NEX_DB install. Check the path and database setup."
+        exit 1
+    fi
+
+    if ! grep -q "$AUTOCOMPLETE" $HOME/.bashrc ; then 
+        echo -e "# nex config\nsource $AUTOCOMPLETE" >> $HOME/.bashrc
+    fi
+}
+
+
+# set -x
+
+AUTOCOMPLETE="$HOME/.nex/.autocomplete.sh"
+DB_FILE="$HOME/.nex/nex.db3"
+NEX_DB="$HOME/.nex/nex_db"
+
+[ ! -d "$HOME/.nex" ] && mkdir -p "$HOME/.nex"
+
+[[ ! -f "$DB_FILE" ]] && install
+
+[[ ! -f "$AUTOCOMPLETE" ]] && {
+  cp "./$(basename $AUTOCOMPLETE)" "$AUTOCOMPLETE"
+}
+
+source "$AUTOCOMPLETE"
+
+ZAP_ARGS=$@
+TARGET=$3
+
+ipaddr=$2
+
+case $1 in
+  build-db|pass|user|clone|connect|dump-db|dynpf|get|ip|put|ping|shareids|socks|sudopass|zap)
+    $1
+    ;;
+  *)
+    printf "usage: bpk (build-db|pass|user|clone|connect|dump-db|dynpf|get|ip|put|ping|shareids|socks|sudopass|zap)\n"
+    exit 1
+    ;;
+esac
