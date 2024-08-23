@@ -228,7 +228,7 @@ case $1 in
     $1
     ;;
   *)
-    printf "usage: bpk (build-db|pass|user|clone|connect|dump-db|dynpf|get|ip|put|ping|shareids|socks|sudopass|zap)\n"
+    printf "usage: nex (build-db|pass|user|clone|connect|dump-db|dynpf|get|ip|put|ping|shareids|socks|sudopass|zap)\n"
     exit 1
     ;;
 esac
