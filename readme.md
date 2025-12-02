@@ -1,5 +1,5 @@
 # 🚀 **NEX**
-### *The Ultimate SSH Operations Toolkit — Fast. Secure. Zero Bullshit.*
+### *The Ultimate SSH Operations Toolkit — Fast. Secure. Effortless.* 
 
 **NEX** is a high-velocity SSH workflow engine built for engineers who manage fleets, not single servers.  
 Think of it as a **Swiss-Army knife for distributed Linux ops** — with encrypted credentials, parallel execution, file transfers, SOCKS tunnels, cloning, and YAML-driven platform imports.
