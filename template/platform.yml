@@ -1,0 +1,25 @@
+all:
+  username: support
+  password: aGVsbG9fd29ybGQK
+  socks_port: 9999
+  remote_port: 22
+
+sites:
+  customer-01:
+    hosts:
+      redhat-01:
+        ipaddr: 192.168.100.11
+      redhat-02:
+        ipaddr: 192.168.100.12
+      redhat-vip:
+        ipaddr: 192.168.100.10
+      cache-01:
+        ipaddr: 192.168.100.21
+      cache-02:
+        ipaddr: 192.168.100.22
+  customer-02:
+    hosts:
+      redhat-01:
+        ipaddr: 10.20.200.11
+      redhat-02:
+        ipaddr: 10.20.200.12
